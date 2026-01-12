@@ -1,0 +1,21 @@
+# GitHub Uploader Pro - Requirements
+# PyQt6 GUI Framework
+PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
+qasync>=0.27.1
+
+# GitHub Integration
+PyGithub>=2.1.0
+GitPython>=3.1.40
+
+# Security & Credentials
+keyring>=24.3.0
+
+# HTTP Client
+httpx>=0.26.0
+
+# Logging
+loguru>=0.7.2
+
+# Theme
+pyqtdarktheme>=2.1.0
