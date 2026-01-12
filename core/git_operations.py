@@ -3,6 +3,7 @@ GitHub Uploader Pro - Git操作封装
 提供本地Git仓库操作功能
 """
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Tuple, Callable
@@ -60,6 +61,17 @@ class GitOperations:
         """设置输出回调"""
         self._on_output = callback
     
+    def _sanitize_log(self, text: str) -> str:
+        """
+        脱敏日志中的敏感信息
+        隐藏 URL 中的 token (x-access-token:...)
+        """
+        # Regex to match: x-access-token:TOKEN@
+        # We replace it with x-access-token:******@
+        if not text:
+            return ""
+        return re.sub(r'(x-access-token:)([^@]+)(@)', r'\1******\3', text)
+    
     def _run_git(
         self,
         args: List[str],
@@ -76,7 +88,7 @@ class GitOperations:
             return False, "", "ERR_PATH: 仓库路径未定义"
         
         cmd = ["git"] + args
-        cmd_str = " ".join(cmd)
+        cmd_str = self._sanitize_log(" ".join(cmd))
         
         # 环境变量设置：强制 flush，禁用交互
         env = os.environ.copy()
@@ -127,7 +139,9 @@ class GitOperations:
                         if self._on_output and not is_spam:
                             # 标记错误流
                             prefix = "🔴 " if is_stderr and check else ""
-                            self._on_output(f"{prefix}{line}")
+                            # V4.8.8 Fix: 日志脱敏
+                            safe_line = self._sanitize_log(line)
+                            self._on_output(f"{prefix}{safe_line}")
                     stream.close()
                 
                 import threading
@@ -170,7 +184,7 @@ class GitOperations:
                     continue
                 
                 if check:
-                    logger.warning(f"Process Failed [{process.returncode}]: {last_error}")
+                    logger.warning(f"Process Failed [{process.returncode}]: {self._sanitize_log(last_error)}")
                 
                 return False, stdout_str, stderr_str
 
@@ -178,9 +192,9 @@ class GitOperations:
                 logger.error(f"⏳ 命令超时: {timeout}s")
                 continue
             except Exception as e:
-                return False, "", str(e)
+                return False, "", self._sanitize_log(str(e))
         
-        return False, "", f"V4_ABORT_AFTER_RETRIES: {last_error}"
+        return False, "", f"V4_ABORT_AFTER_RETRIES: {self._sanitize_log(last_error)}"
 
     def get_head_oid(self, branch: str = "HEAD") -> Optional[str]:
         """获取指定引用的 OID (SHA-1) v4.4"""

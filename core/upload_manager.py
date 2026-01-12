@@ -11,6 +11,7 @@ from loguru import logger
 
 from .git_operations import git_ops, GitOperations
 from .github_client import github_client
+from .credential_manager import credential_manager
 from utils.config import config
 
 
@@ -219,8 +220,18 @@ logs/
         # 动态配置远程端点
         if github_client.is_connected and github_client.user:
             # 兼容性处理
-            remote_url = f"https://github.com/{options.repo_full_name}.git"
-            self._emit_log(f"🔗 正在建立加密链路至: {remote_url}")
+            # V4.8.7 Fix: 注入访问令牌以避免交互式提示
+            token = credential_manager.get_access_token()
+            if token:
+                # 使用令牌构建认证URL
+                remote_url = f"https://x-access-token:{token}@github.com/{options.repo_full_name}.git"
+                # 日志中隐藏敏感信息
+                safe_url = f"https://github.com/{options.repo_full_name}.git"
+                self._emit_log(f"🔗 正在建立加密链路至: {safe_url}")
+            else:
+                remote_url = f"https://github.com/{options.repo_full_name}.git"
+                self._emit_log(f"🔗 正在建立加密链路至: {remote_url}")
+            
             self._git.set_remote(remote_url)
         
         # 步骤3: 智能文件索引
@@ -280,24 +291,33 @@ logs/
             # V4 AI 自愈逻辑集成 (Smart Sync)
             self._emit_log("⚠️ 检测到同步冲突，启动 [Smart Sync] 智能同步引擎...")
             
-            # 策略A: 尝试变基合并 (Rebase)
-            self._emit_log("🔄 正在尝试 Rebase 策略合并远程变更...")
-            if self._git.rebase(branch=options.branch):
-                self._emit_log("✅ 变基合并成功，再次尝试推送...")
+            # 策略A: 尝试标准拉取合并 (Pull & Merge) - 优先策略
+            self._emit_log("🔄 策略A: 正在尝试拉取合并远程变更...")
+            if self._git.pull(branch=options.branch):
+                self._emit_log("✅ 拉取合并成功，再次尝试推送...")
                 if self._git.push(branch=options.branch, force=False):
-                     self._emit_log("🎉 Smart Sync 同步成功！")
+                     self._emit_log("🎉 Smart Sync (Merge) 同步成功！")
                      push_success = True
+            
+            if not push_success:
+                # 策略B: 尝试变基合并 (Rebase)
+                self._emit_log("🔄 策略B: 正在尝试 Rebase 策略合并远程变更...")
+                if self._git.rebase(branch=options.branch):
+                    self._emit_log("✅ 变基合并成功，再次尝试推送...")
+                    if self._git.push(branch=options.branch, force=False):
+                         self._emit_log("🎉 Smart Sync (Rebase) 同步成功！")
+                         push_success = True
             
             if not push_success:
                 self._emit_log("⚠️ 变基失败或冲突，正在回滚并不安全模式...")
                 self._git.abort_rebase()
                 
-                # 策略B: 强制推送 (Force Push) - 最终手段
+                # 策略C: 强制推送 (Force Push) - 最终手段
                 self._emit_log("🔮 激活 AI Nebula 终极策略: 强制覆盖 (Force Push)")
                 self._emit_log("⚠️ 注意: 远程的历史记录将被本地覆盖")
                 
                 if not self._git.push(branch=options.branch, force=True):
-                    raise RuntimeError("SYNC_ABORT: 所有自动修复策略(Rebase/Force)均已失效，请检查网络或权限。")
+                    raise RuntimeError("SYNC_ABORT: 所有自动修复策略(Merge/Rebase/Force)均已失效，请检查网络或权限。")
         
         # 步骤6: 原子化完整性校验 v4.4 (Sentinel Check)
         self._emit_progress(UploadProgress(
